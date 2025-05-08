@@ -1,0 +1,74 @@
+﻿#pragma kernel CS_pixel_sorting
+#include "Lib/Luminance.cginc"
+
+cbuffer SortingParams {
+    uint sort_axis;
+    uint sort_direction;
+}
+
+RWTexture2D<float4> input;
+RWTexture2D<float4> output;
+
+uint2 coord(uint current_point, uint fixed) {
+    return sort_axis == 0 ? uint2(fixed, current_point) : uint2(current_point, fixed);
+}
+
+void insertion_sort_range(uint fixedCoord, uint startMain, uint endMain) {
+    for (uint i = startMain + 1; i < endMain; i++) {
+        uint2 current_coord = coord(i, fixedCoord);
+        float4 key_pixel = input[current_coord];
+        float key_luminance = luminance(key_pixel.rgb);
+
+        int j = int(i) - 1;
+        while (j >= int(startMain)) {
+            float4 compare_pixel = input[coord(j, fixedCoord)];
+            float compare_luminance = luminance(compare_pixel.rgb);
+
+            bool swappable = sort_direction == 1
+                ? compare_luminance > key_luminance
+                : compare_luminance < key_luminance;
+
+            if (swappable) {
+                input[coord(j + 1, fixedCoord)] = compare_pixel;
+                j--;
+            } else {
+                break;
+            }
+        }
+        input[coord(j + 1, fixedCoord)] = key_pixel;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void CS_pixel_sorting(uint3 id : SV_DispatchThreadID) {
+    uint width, height;
+    input.GetDimensions(width, height);
+
+    uint fixed_coord = sort_axis == 0 ? id.x : id.y;
+    uint max_point = sort_axis == 0 ? height : width;
+
+    uint current_point = 0;
+    while (current_point < max_point) {
+        while (current_point < max_point) {
+            float alpha = input[coord(current_point, fixed_coord)].a;
+            if (alpha > 0) break;
+            current_point++;
+        }
+        uint start_main = current_point;
+
+        while (current_point < max_point) {
+            float alpha = input[coord(current_point, fixed_coord)].a;
+            if (alpha == 0) break;
+            current_point++;
+        }
+        uint end_main = current_point;
+
+        if (start_main < end_main) {
+            insertion_sort_range(fixed_coord, start_main, end_main);
+        }
+    }
+
+    for (uint i = 0; i < max_point; i++) {
+        output[coord(i, fixed_coord)] = input[coord(i, fixed_coord)];
+    }
+}
